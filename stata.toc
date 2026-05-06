@@ -1,0 +1,4 @@
+v 3
+d SVARTOOLS: Tools for simulating and visualizing SVAR models
+d Zhenkun Lu (lzkzzer@163.com)
+p svartools
