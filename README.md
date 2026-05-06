@@ -42,6 +42,10 @@ irf_dualband, irffile("myirf.irf") impulse(y1) response(y2) ///
               irfname(svar1) normalize
 ```
 
+## Example Output
+
+![IRF with dual confidence bands](images/irf_plot.png)
+
 ## License
 
 MIT
