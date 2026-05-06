@@ -5,7 +5,7 @@ Stata tools for simulating and visualizing structural VAR models.
 ## Installation
 
 ```stata
-net install svartools, from("https://raw.githubusercontent.com/EconSolider/svartools/main/")
+net install svartools, from("https://raw.githubusercontent.com/EconSolider/svartools/main/") replace
 ```
 
 To update later:
