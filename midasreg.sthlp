@@ -24,7 +24,7 @@
 {synopt :{cmdab:m:ratio(}{it:#}{cmd:)}}频率比 m(月度对季度填 3,月度对年度填 12,季度对年度填 4 等){p_end}
 
 {syntab :模型细节}
-{synopt :{cmdab:w:eight(}{it:scheme}{cmd:)}}权重函数:{cmd:nealmon}、{cmd:beta}、{cmd:betann}、{cmd:almon} 或 {cmd:umidas};默认 {cmd:nealmon}{p_end}
+{synopt :{cmdab:ws:cheme(}{it:scheme}{cmd:)}}权重函数:{cmd:nealmon}、{cmd:beta}、{cmd:betann}、{cmd:almon} 或 {cmd:umidas};默认 {cmd:nealmon}{p_end}
 {synopt :{cmdab:yl:ags(}{it:numlist}{cmd:)}}加入被解释变量的低频滞后项(构成 ADL-MIDAS){p_end}
 {synopt :{cmdab:noc:onstant}}不估计常数项{p_end}
 
@@ -76,7 +76,7 @@
 {dlgtab:模型细节}
 
 {phang}
-{cmd:weight(}{it:scheme}{cmd:)} 选择用来约束 K = kmax-kmin+1 个高频滞后系数的参数化权重函数 {it:w(s; theta)}:
+{cmd:wscheme(}{it:scheme}{cmd:)} 选择用来约束 K = kmax-kmin+1 个高频滞后系数的参数化权重函数 {it:w(s; theta)}:
 
 {p 8 12 2}{cmd:nealmon} {hline 2} 归一化指数 Almon 多项式:{it:w_s = exp(theta1*s + theta2*s^2)/sum_j exp(...)};2 个参数;能描述多种衰减形态;默认选项。{p_end}
 
@@ -173,29 +173,29 @@
 
 {pstd}同样的模型,改用 Ghysels-Santa-Clara-Valkanov Beta 权重并报告稳健标准误:{p_end}
 {phang2}{cmd:. midasreg gdp_growth, hfvar(emp_growth) lags(0 11) mratio(3) ///}{p_end}
-{phang2}{cmd:    weight(beta) ylags(1) robust}{p_end}
+{phang2}{cmd:    wscheme(beta) ylags(1) robust}{p_end}
 
 {pstd}用 22 个日度收益预测月度已实现波动率(类 HAR-RV 设定):{p_end}
-{phang2}{cmd:. midasreg rv_m, hfvar(rv_d) lags(1 22) mratio(22) weight(nealmon)}{p_end}
+{phang2}{cmd:. midasreg rv_m, hfvar(rv_d) lags(1 22) mratio(22) wscheme(nealmon)}{p_end}
 
 {pstd}无约束 MIDAS——每个高频滞后单独一个系数,等价于对全部滞后做 OLS;K 较小时推荐:{p_end}
-{phang2}{cmd:. midasreg gdp_growth, hfvar(emp_growth) lags(0 5) mratio(3) weight(umidas)}{p_end}
+{phang2}{cmd:. midasreg gdp_growth, hfvar(emp_growth) lags(0 5) mratio(3) wscheme(umidas)}{p_end}
 
 {pstd}用户自定义初始值:{p_end}
-{phang2}{cmd:. midasreg y, hfvar(x) lags(0 11) mratio(3) weight(nealmon) ///}{p_end}
+{phang2}{cmd:. midasreg y, hfvar(x) lags(0 11) mratio(3) wscheme(nealmon) ///}{p_end}
 {phang2}{cmd:    initial(0  1  0.5 -0.05)}{p_end}
 
 
 {title:说明与注意事项}
 
 {pstd}
-{it:关于识别。} 使用 {cmd:weight(nealmon)}、{cmd:weight(beta)} 或 {cmd:weight(betann)} 时,权重被归一化到和为 1,因此高频系数的"总和"由一个单独的主系数 {it:lambda}(在输出中记为 {it:hfvar}_slope)识别;此时权重函数参数仅决定滞后剖面的{it:形状}。而 {cmd:weight(almon)} 与 {cmd:weight(umidas)} 直接识别各滞后系数本身,不再单独估计 lambda。
+{it:关于识别。} 使用 {cmd:wscheme(nealmon)}、{cmd:wscheme(beta)} 或 {cmd:wscheme(betann)} 时,权重被归一化到和为 1,因此高频系数的"总和"由一个单独的主系数 {it:lambda}(在输出中记为 {it:hfvar}_slope)识别;此时权重函数参数仅决定滞后剖面的{it:形状}。而 {cmd:wscheme(almon)} 与 {cmd:wscheme(umidas)} 直接识别各滞后系数本身,不再单独估计 lambda。
 
 {pstd}
-{it:关于滞后阶数选择。} 由于权重函数把所有高频滞后系数绑在一起,K = kmax-kmin+1 可以选得比较大而不必担心自由度损失。Foroni、Marcellino、Schumacher(2015)指出,当 K 较小时无约束 MIDAS 反而常常表现更好;此时可用 {cmd:weight(umidas)}。
+{it:关于滞后阶数选择。} 由于权重函数把所有高频滞后系数绑在一起,K = kmax-kmin+1 可以选得比较大而不必担心自由度损失。Foroni、Marcellino、Schumacher(2015)指出,当 K 较小时无约束 MIDAS 反而常常表现更好;此时可用 {cmd:wscheme(umidas)}。
 
 {pstd}
-{it:关于初始值。} 归一化指数 Almon 或 Beta 权重的非线性最小二乘对初始值比较敏感——尤其当默认初始下 {it:lambda} 的符号方向不对时。如果不收敛或迭代日志显示 lambda 发散,请通过 {cmd:initial()} 提供更合理的起始值,或先用 {cmd:weight(umidas)} 跑一遍观察滞后剖面再选择合适的参数权重。
+{it:关于初始值。} 归一化指数 Almon 或 Beta 权重的非线性最小二乘对初始值比较敏感——尤其当默认初始下 {it:lambda} 的符号方向不对时。如果不收敛或迭代日志显示 lambda 发散,请通过 {cmd:initial()} 提供更合理的起始值,或先用 {cmd:wscheme(umidas)} 跑一遍观察滞后剖面再选择合适的参数权重。
 
 
 {title:已实现的权重函数一览}

@@ -1,4 +1,4 @@
-*! midasreg v1.0.0  24may2026
+*! midasreg v1.0.1  24may2026
 *! Mixed Data Sampling (MIDAS) regression
 *! Implements MIDAS regression following Ghysels, Santa-Clara & Valkanov (2002)
 *! "The MIDAS Touch: Mixed Data Sampling Regression Models" and
@@ -24,7 +24,7 @@ program define midasreg, eclass
         HFvar(varname numeric)                       ///
         Lags(numlist integer >=0 sort)               ///
         Mratio(integer)                              ///
-        [ Weight(string)                             ///
+        [ Wscheme(string)                            ///
           YLags(numlist integer >0 sort)             ///
           INITial(numlist)                           ///
           ITERate(integer 200)                       ///
@@ -42,11 +42,14 @@ program define midasreg, eclass
     marksample touse
     markout `touse' `depvar' `lfvars'
 
+    /* internal name 'weight' kept for code readability */
+    local weight "`wscheme'"
+
     /*--- default weight scheme ---*/
     if "`weight'" == "" local weight "nealmon"
     local weight = lower("`weight'")
     if !inlist("`weight'","nealmon","beta","betann","almon","umidas") {
-        di as err "weight() must be one of: nealmon, beta, betann, almon, umidas"
+        di as err "wscheme() must be one of: nealmon, beta, betann, almon, umidas"
         exit 198
     }
 
@@ -173,8 +176,12 @@ program define midasreg, eclass
         /* default starting values */
         local b0 ""
         if `hascons' local b0 "0 "
-        forvalues k = 1/`nlf'     { local b0 "`b0' 0 " }
-        forvalues k = 1/`nylags'  { local b0 "`b0' 0 " }
+        forvalues k = 1/`nlf' {
+            local b0 "`b0' 0 "
+        }
+        forvalues k = 1/`nylags' {
+            local b0 "`b0' 0 "
+        }
         /* slope */
         if `nslope' == 1 local b0 "`b0' 1 "
         /* weight params -- defaults */
@@ -191,7 +198,9 @@ program define midasreg, eclass
             local b0 "`b0' 0 0 0"
         }
         else if "`weight'" == "umidas" {
-            forvalues k = 1/`K' { local b0 "`b0' 0 " }
+            forvalues k = 1/`K' {
+                local b0 "`b0' 0 "
+            }
         }
     }
 
@@ -215,10 +224,12 @@ program define midasreg, eclass
     scalar `sk'    = r(_k)
 
     /*--- build coefficient labels for ereturn ---*/
-    matrix `bvec' = `bvec''
+    /* bvec is already a 1xk row vector from Mata's st_matrix(bname, b') */
     local cnames ""
     if `hascons' local cnames "`cnames' _cons"
-    foreach v of local lfvars { local cnames "`cnames' `v'" }
+    foreach v of local lfvars {
+        local cnames "`cnames' `v'"
+    }
     if `nylags' > 0 {
         foreach p of local ylags {
             local cnames "`cnames' L`p'.`depvar'"
@@ -310,43 +321,58 @@ mata set matastrict off
    so that the weights sum to one (except 'almon' which is the raw
    polynomial, and 'umidas' which is identity). */
 
-real colvector _midas_w_nealmon(real vector theta, real scalar K)
-{
-    /* w_s = exp(theta1*s + theta2*s^2) / sum_j exp(theta1*j+theta2*j^2) */
-    real colvector s, num
-    s = (1::K)
-    num = exp(theta[1]:*s + theta[2]:*(s:^2))
+real colvector _midas_w_nealmon(real vector theta, real scalar K) {
+    /* w_s = exp(theta1*s + theta2*s^2) / sum_j exp(theta1*j+theta2*j^2)
+       Subtract the max of the exponent before exp() for numerical
+       stability (softmax-style); the ratio is invariant to that shift. */
+    real colvector s, lin, num
+    real scalar lmax
+    s   = (1::K)
+    lin = theta[1]:*s :+ theta[2]:*(s:^2)
+    lmax = max(lin)
+    if (lmax == . | missing(lmax)) lmax = 0
+    num = exp(lin :- lmax)
     return(num :/ sum(num))
 }
 
-real colvector _midas_w_beta(real vector theta, real scalar K)
-{
+real colvector _midas_w_beta(real vector theta, real scalar K) {
     /* Normalized beta with last weight forced to zero (Ghysels Beta).
        theta = (a, b),  a>0, b>0.
-       x_s = (s-1)/(K-1) ; small xi to avoid 0 and 1. */
-    real colvector s, x, num
-    real scalar xi
+       x_s = (s-1)/(K-1) ; small xi to avoid 0 and 1.
+       Compute in log domain then exp(stable shift) for safety. */
+    real colvector s, x, lognum, num
+    real scalar xi, a, b, lmax
     xi = 1e-8
-    s = (1::K)
-    x = xi :+ (1-2*xi) :* (s :- 1) :/ (K - 1)
-    num = (x:^(theta[1]-1)) :* ((1:-x):^(theta[2]-1))
+    s  = (1::K)
+    x  = xi :+ (1-2*xi) :* (s :- 1) :/ (K - 1)
+    a  = max((theta[1], 1e-3))
+    b  = max((theta[2], 1e-3))
+    lognum = (a-1) :* log(x) :+ (b-1) :* log(1:-x)
+    lmax = max(lognum)
+    if (lmax == . | missing(lmax)) lmax = 0
+    num = exp(lognum :- lmax)
     return(num :/ sum(num))
 }
 
-real colvector _midas_w_betann(real vector theta, real scalar K)
-{
+real colvector _midas_w_betann(real vector theta, real scalar K) {
     /* Normalized beta with non-zero last weight: w_s = (psi_s + c)/sum  */
-    real colvector s, x, num
-    real scalar xi
+    real colvector s, x, lognum, num
+    real scalar xi, a, b, lmax
     xi = 1e-8
-    s = (1::K)
-    x = xi :+ (1-2*xi) :* (s :- 1) :/ (K - 1)
-    num = (x:^(theta[1]-1)) :* ((1:-x):^(theta[2]-1)) :+ theta[3]
+    s  = (1::K)
+    x  = xi :+ (1-2*xi) :* (s :- 1) :/ (K - 1)
+    a  = max((theta[1], 1e-3))
+    b  = max((theta[2], 1e-3))
+    lognum = (a-1) :* log(x) :+ (b-1) :* log(1:-x)
+    lmax = max(lognum)
+    if (lmax == . | missing(lmax)) lmax = 0
+    num = exp(lognum :- lmax) :+ theta[3]
+    /* protect against negative weights when theta[3] is very negative */
+    num = num :- min(num) :+ 1e-10
     return(num :/ sum(num))
 }
 
-real colvector _midas_w_almon(real vector a, real scalar K)
-{
+real colvector _midas_w_almon(real vector a, real scalar K) {
     /* Raw Almon polynomial of order 2:  b_s = a0 + a1*s + a2*s^2.
        No normalization: each parameter is identified directly.       */
     real colvector s
@@ -354,8 +380,7 @@ real colvector _midas_w_almon(real vector a, real scalar K)
     return(a[1] :+ a[2]:*s :+ a[3]:*(s:^2))
 }
 
-real colvector _midas_w_umidas(real vector a, real scalar K)
-{
+real colvector _midas_w_umidas(real vector a, real scalar K) {
     /* return a column vector regardless of input orientation */
     if (cols(a) > rows(a)) return(a')
     return(a)
@@ -363,8 +388,7 @@ real colvector _midas_w_umidas(real vector a, real scalar K)
 
 /*-------- dispatch on weight name --------*/
 real colvector _midas_weights(string scalar wname, real vector theta,
-                              real scalar K)
-{
+                              real scalar K) {
     if (wname=="nealmon") return(_midas_w_nealmon(theta, K))
     if (wname=="beta")    return(_midas_w_beta(theta, K))
     if (wname=="betann")  return(_midas_w_betann(theta, K))
@@ -386,8 +410,7 @@ real colvector _midas_resid(real colvector b, real colvector y,
                             real matrix Z, real matrix X,
                             string scalar wname,
                             real scalar K, real scalar nwpar,
-                            real scalar nslope, real scalar p)
-{
+                            real scalar nslope, real scalar p) {
     real colvector beta_lf, theta, w, yhat, mid
     real scalar lambda
 
@@ -416,11 +439,10 @@ real scalar _midas_sse(real colvector b, real colvector y,
                        real matrix Z, real matrix X,
                        string scalar wname,
                        real scalar K, real scalar nwpar,
-                       real scalar nslope, real scalar p)
-{
+                       real scalar nslope, real scalar p) {
     real colvector e
     e = _midas_resid(b, y, Z, X, wname, K, nwpar, nslope, p)
-    return(e'e)
+    return(e' * e)
 }
 
 /*-------- numerical Jacobian of residuals wrt b --------*/
@@ -428,23 +450,25 @@ real matrix _midas_J(real colvector b, real colvector y,
                      real matrix Z, real matrix X,
                      string scalar wname,
                      real scalar K, real scalar nwpar,
-                     real scalar nslope, real scalar p)
-{
-    real matrix J
+                     real scalar nslope, real scalar p) {
+    real matrix Jac
     real colvector bp, bm, ep, em
-    real scalar i, h, npar
+    real scalar i, h, npar, sqrteps
     npar = rows(b)
-    J = J(rows(y), npar, .)
+    sqrteps = sqrt(epsilon(1))           /* ~ 1.49e-8 */
+    Jac = J(rows(y), npar, .)
     for (i=1; i<=npar; i++) {
-        h = max((1e-6, 1e-4*abs(b[i])))
+        /* Press et al. (Numerical Recipes) recommendation */
+        h = sqrteps * max((abs(b[i]), 1))
         bp = b ; bm = b
         bp[i] = b[i] + h ; bm[i] = b[i] - h
+        h = bp[i] - b[i]                 /* actual step after roundoff */
         ep = _midas_resid(bp, y, Z, X, wname, K, nwpar, nslope, p)
         em = _midas_resid(bm, y, Z, X, wname, K, nwpar, nslope, p)
-        J[,i] = (ep :- em) :/ (2*h)
+        Jac[,i] = (ep :- em) :/ (2*h)
     }
-    /* The Jacobian of e = y - f wrt b is -df/db, so J above is -df/db */
-    return(J)
+    /* The Jacobian of e = y - f wrt b is -df/db, so Jac above is -df/db */
+    return(Jac)
 }
 
 /*-------- Levenberg-Marquardt nonlinear least squares --------*/
@@ -454,61 +478,100 @@ real colvector _midas_lm(real colvector b0, real colvector y,
                          real scalar K, real scalar nwpar,
                          real scalar nslope, real scalar p,
                          real scalar maxit, real scalar tol,
-                         real scalar verbose)
-{
-    real colvector b, e, g, delta, b_new, e_new
-    real matrix J, JJ, A
-    real scalar lambda, sse, sse_new, it, npar
+                         real scalar verbose) {
+    real colvector b, e, g, delta, b_new, e_new, b_best
+    real matrix Jac, JJ, A
+    real scalar lambda, sse, sse_new, it, npar, gnorm, ratio, accepted
+    real scalar sse_best, maxstep, dnorm, scale
     b = b0
     e = _midas_resid(b, y, Z, X, wname, K, nwpar, nslope, p)
-    sse = e'e
+    sse = e' * e
+    sse_best = sse
+    b_best = b
     lambda = 1e-3
     npar = rows(b)
+    /* trust-region radius: cap each L-M step's L2 norm to this initially. */
+    maxstep = 2.0
     if (verbose) {
         printf("\n{txt}Levenberg-Marquardt iterations:\n")
-        printf("{txt}  iter     sse           lambda\n")
+        printf("{txt}  iter      sse          lambda      |grad|     |step|\n")
         printf("{txt} %4.0f   %12.6g   %10.4g\n", 0, sse, lambda)
     }
     for (it=1; it<=maxit; it++) {
-        J = _midas_J(b, y, Z, X, wname, K, nwpar, nslope, p)
-        /* e = y - f, so de/db = -df/db, gradient of 0.5*e'e wrt b is
-           J' e where J = de/db.  Normal equations:
-              ( J'J + lambda * diag(J'J) ) delta = - J' e               */
-        JJ = J'J
-        g  = J'e
-        A  = JJ + lambda * diag(diagonal(JJ))
-        if (rank(A) < npar) {
-            A = A + 1e-8 * I(npar)
+        Jac = _midas_J(b, y, Z, X, wname, K, nwpar, nslope, p)
+        if (hasmissing(Jac)) {
+            if (verbose) printf("{err}  Jacobian has missing values at iteration %f; stopping\n", it)
+            break
         }
-        delta = -lusolve(A, g)
-        b_new = b + delta
-        e_new = _midas_resid(b_new, y, Z, X, wname, K, nwpar, nslope, p)
-        sse_new = e_new'e_new
-        if (sse_new < sse) {
-            /* accept */
-            if (abs(sse - sse_new) < tol*(abs(sse)+tol)) {
-                b = b_new ; sse = sse_new
-                if (verbose) printf("{txt} %4.0f   %12.6g   %10.4g  (converged)\n", it, sse, lambda)
+        JJ = Jac' * Jac
+        g  = Jac' * e
+        gnorm = sqrt(g' * g)
+        if (gnorm < 1e-8 * (1 + sqrt(sse))) {
+            if (verbose) printf("{txt} %4.0f   %12.6g   %10.4g   %10.4g  (gradient small)\n", it, sse, lambda, gnorm)
+            break
+        }
+        accepted = 0
+        /* try up to 12 lambda increases per iteration */
+        for (ratio = 0; ratio < 12; ratio++) {
+            A = JJ + lambda * (diag(diagonal(JJ)) + 1e-10 * I(npar))
+            delta = -lusolve(A, g)
+            if (hasmissing(delta)) {
+                lambda = lambda * 10
+                if (lambda > 1e+15) break
+                continue
+            }
+            /* trust-region: clip ||delta|| <= maxstep */
+            dnorm = sqrt(delta' * delta)
+            if (dnorm > maxstep) {
+                scale = maxstep / dnorm
+                delta = delta * scale
+                dnorm = maxstep
+            }
+            b_new = b + delta
+            e_new = _midas_resid(b_new, y, Z, X, wname, K, nwpar, nslope, p)
+            if (hasmissing(e_new)) {
+                lambda = lambda * 10
+                maxstep = maxstep / 2
+                if (lambda > 1e+15 | maxstep < 1e-12) break
+                continue
+            }
+            sse_new = e_new' * e_new
+            if (sse_new < sse) {
+                /* accept the step */
+                if (sse_new < sse_best) {
+                    sse_best = sse_new
+                    b_best = b_new
+                }
+                if (verbose & (it<=3 | mod(it,10)==0)) {
+                    printf("{txt} %4.0f   %12.6g   %10.4g   %10.4g   %10.4g\n", it, sse_new, lambda, gnorm, dnorm)
+                }
+                if (abs(sse - sse_new) < tol*(abs(sse)+tol)) {
+                    b = b_new ; e = e_new ; sse = sse_new
+                    if (verbose) {
+                        printf("{txt} %4.0f   %12.6g   %10.4g   %10.4g   %10.4g  (converged)\n", it, sse_new, lambda, gnorm, dnorm)
+                    }
+                    return(b)
+                }
+                b = b_new ; e = e_new ; sse = sse_new
+                lambda = max((lambda/10, 1e-15))
+                maxstep = min((maxstep * 2, 100))
+                accepted = 1
                 break
             }
-            b = b_new ; sse = sse_new
-            lambda = max((lambda/10, 1e-12))
-        }
-        else {
+            /* step did not lower sse */
             lambda = lambda * 10
-            if (lambda > 1e+12) {
-                if (verbose) printf("{err}  lambda blew up; stopping\n")
-                break
-            }
+            maxstep = maxstep / 2
+            if (lambda > 1e+15 | maxstep < 1e-12) break
         }
-        if (verbose & mod(it,5)==0) {
-            printf("{txt} %4.0f   %12.6g   %10.4g\n", it, sse, lambda)
+        if (accepted == 0) {
+            if (verbose) printf("{txt}  could not find a downhill step at iteration %f (best sse so far = %g)\n", it, sse_best)
+            break
         }
     }
     if (verbose & it>=maxit) {
         printf("{err}  warning: maximum iterations (%f) reached\n", maxit)
     }
-    return(b)
+    return(b_best)
 }
 
 /*-------- main fit routine called from ado --------*/
@@ -521,10 +584,9 @@ void _midas_fit(string scalar dvname, string scalar lfnames,
                 real scalar tol,       real scalar dorob,
                 string scalar b0str,
                 string scalar bname,   string scalar vname,
-                real scalar verbose)
-{
+                real scalar verbose) {
     real colvector y, b0, b, e
-    real matrix    Z, X, V
+    real matrix    Z, X, V, Jac, XtX_inv, JtJ, Je
     real scalar    N, p, sigma2
 
     /* Pull data */
@@ -560,20 +622,26 @@ void _midas_fit(string scalar dvname, string scalar lfnames,
     b = _midas_lm(b0, y, Z, X, wname, K, nwpar, nslope, p,
                   maxit, tol, verbose)
 
-    /* residuals & variance */
+    /* residuals & variance at final b */
     e = _midas_resid(b, y, Z, X, wname, K, nwpar, nslope, p)
-    sigma2 = (e'e) / (N - rows(b))
+    if (hasmissing(e)) {
+        printf("{err}  warning: estimated residuals contain missing values; results may be unreliable\n")
+        e = editmissing(e, 0)
+    }
+    sigma2 = (e' * e) / (N - rows(b))
 
-    real matrix J
-    J = _midas_J(b, y, Z, X, wname, K, nwpar, nslope, p)
-    /* covariance:  Gauss-Newton (J'J)^{-1} * sigma2  ; or sandwich   */
-    real matrix XtX_inv
-    XtX_inv = invsym(J'J)
+    Jac = _midas_J(b, y, Z, X, wname, K, nwpar, nslope, p)
+    if (hasmissing(Jac)) {
+        printf("{err}  warning: Jacobian at solution contains missing values; covariance matrix may be unreliable\n")
+        Jac = editmissing(Jac, 0)
+    }
+    /* covariance:  Gauss-Newton (J'J)^{-1} * sigma2  ; or sandwich */
+    JtJ = Jac' * Jac
+    XtX_inv = invsym(JtJ + 1e-12 * I(rows(JtJ)))
     if (dorob) {
-        /* HC0-type robust:  (J'J)^{-1} J' diag(e^2) J (J'J)^{-1}      */
-        real matrix meat
-        meat = J' * diag(e:^2) * J
-        V = XtX_inv * meat * XtX_inv
+        /* HC0-type sandwich, computed without forming N x N diag(e^2) */
+        Je = Jac :* (e:^2)
+        V  = XtX_inv * (Jac' * Je) * XtX_inv
     }
     else {
         V = sigma2 :* XtX_inv
@@ -583,9 +651,9 @@ void _midas_fit(string scalar dvname, string scalar lfnames,
     st_matrix(bname, b')
     st_matrix(vname, V)
 
-    /* a few useful scalars communicated back through r() */
+    /* useful scalars communicated back through r() */
     st_numscalar("r(_N)",      N)
-    st_numscalar("r(_rss)",    e'e)
+    st_numscalar("r(_rss)",    e' * e)
     st_numscalar("r(_sigma2)", sigma2)
     st_numscalar("r(_rmse)",   sqrt(sigma2))
     st_numscalar("r(_df_r)",   N - rows(b))

@@ -3,15 +3,19 @@ d 'SVARTOOLS': Tools for simulating and visualizing SVAR models
 d
 d  sim_svar     - simulate SVAR(p) time series via Mata
 d  irf_dualband - plot IRFs with dual confidence bands
-d
+d  midasreg     - mixed frequency data sampling regression
+e
 d Requires: Stata 14 or later
 d
 d Author: Your Name
 d Email:  your@email.com
 d
-d Distribution-Date: 20260506
+d Distribution-Date: 20260524
 
 f sim_svar.ado
 f sim_svar.sthlp
 f irf_dualband.ado
 f irf_dualband.sthlp
+f midasreg.ado
+f midasreg.sthlp
+f midasreg_test.do
