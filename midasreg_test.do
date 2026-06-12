@@ -159,8 +159,8 @@ label var y            "低频被解释变量(季度)"
 label var midas_x1     "x1 的真实 MIDAS 加权和"
 label var midas_x2     "x2 的真实 MIDAS 加权和"
 
-save midas_test_data.dta, replace
-display _newline "{txt}数据已保存为 midas_test_data.dta"
+*save midas_test_data.dta, replace
+*display _newline "{txt}数据已保存为 midas_test_data.dta"
 
 *===============================================================*
 *  测试 midasreg 命令
@@ -175,8 +175,8 @@ display _newline _newline ///
 * 测试 1:单变量 MIDAS,默认指数 Almon 权重
 *---------------------------------------------------------------*
 display _newline "{txt}>>> 测试 1: 仅用 x1,nealmon 权重,含 1 阶季度 AR"
-midasreg y, hfvar(x1) lags(0 11) mratio(3) wscheme(nealmon) ylags(1)
-
+midasreg y, hfvar(x1) lags(0 11) mratio(3) wscheme(nealmon) ylags(1) ///
+    initial(2  0.5  1.5  0.6  -0.1)
 display _newline "{txt}真实参数: lambda1 = `lambda1', theta1_1 = `theta1_1', " ///
     "theta2_1 = `theta2_1'"
 display "{txt}真实截距 = 2, 真实 AR(1) = 0.5"
