@@ -24,6 +24,7 @@ ado uninstall svartools
 
 - `sim_svar` — simulate SVAR(p) time series via Mata
 - `irf_dualband` — plot impulse responses with dual confidence bands
+- `midasreg` — conduct mixed data sampling regression (series with multiple frequency) 
 
 After installing, see `help sim_svar` and `help irf_dualband`.
 
